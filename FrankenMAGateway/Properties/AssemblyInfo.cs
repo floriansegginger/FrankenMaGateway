@@ -10,9 +10,9 @@ using System.Windows;
 [assembly: AssemblyTitle("FrankenMAGateway")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Proceq SA")]
+[assembly: AssemblyCompany("Florian Segginger")]
 [assembly: AssemblyProduct("FrankenMAGateway")]
-[assembly: AssemblyCopyright("Copyright © Proceq SA 2021")]
+[assembly: AssemblyCopyright("Copyright © Florian Segginger 2021")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
