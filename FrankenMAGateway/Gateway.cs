@@ -5,6 +5,7 @@ using System.ComponentModel;
 using System.IO;
 using System.IO.Ports;
 using System.Linq;
+using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -13,6 +14,13 @@ using System.Xml.Serialization;
 
 namespace FrankenMAGateway
 {
+    public struct FaderValue
+    {
+        public int value;
+        public DateTime lastChange;
+        public bool moving;
+    }
+
     public class GatewaySettings
     {
         public string[,] Keys { get; set; } = new string[,]
@@ -45,6 +53,8 @@ namespace FrankenMAGateway
 
         public string User { get; set; } = "administrator";
         public string Password { get; set; } = "admin";
+        public string Host { get; set; } = "localhost";
+        public bool DebounceFaders { get; set; } = true;
     }
 
     public class Gateway : INotifyPropertyChanged
@@ -250,6 +260,10 @@ namespace FrankenMAGateway
                     lock (PortStatuses)
                     {
                         PortStatuses[portId] = true;
+                        lock (_receiveBuffer)
+                        {
+                            _receiveBuffer.Add(port, "");
+                        }
                     }
                     break;
                 }
@@ -265,8 +279,10 @@ namespace FrankenMAGateway
                     continue;
                 }
             }
-            // Fake data
-            Thread.Sleep(2000 * portId);
+            if (_exiting)
+            {
+                return;
+            }
             PortStatuses[portId] = true;
             DoPropertyChanged(nameof(PortStatuses));
             DoPropertyChanged(nameof(Port0Status));
@@ -292,10 +308,11 @@ namespace FrankenMAGateway
 
         private void Log(string line)
         {
+            Console.WriteLine(line);
             Logs = $"[{DateTime.Now.ToString("HH:mm:ss")}] {line}\r\n{Logs}";
-            if (Logs.Length > 2000)
+            if (Logs.Length > 10000)
             {
-                Logs = Logs.Substring(0, 2000);
+                Logs = Logs.Substring(0, 10000);
             }
         }
 
@@ -306,7 +323,7 @@ namespace FrankenMAGateway
                 try
                 {
                     Log("Trying to connect...");
-                    _telnet = new TcpClient("localhost", 30000);
+                    _telnet = new TcpClient(Settings.Host, 30000);
                 }
                 catch
                 {
@@ -319,8 +336,10 @@ namespace FrankenMAGateway
                 var writer = new StreamWriter(stream);
                 writer.NewLine = "\r\n";
                 bool failed = false;
+                int cnt = 0;
                 while (!_exiting)
                 {
+                    cnt++;
                     string line = reader.ReadLine();
                     if (line == null)
                     {
@@ -328,6 +347,10 @@ namespace FrankenMAGateway
                         break;
                     }
                     if (line.Contains("login !"))
+                    {
+                        break;
+                    }
+                    if (cnt >= 4)
                     {
                         break;
                     }
@@ -347,6 +370,10 @@ namespace FrankenMAGateway
 
                     string line = reader.ReadLine();
                     if (line.Contains("Logged in as"))
+                    {
+                        break;
+                    }
+                    if (cnt++ > 4)
                     {
                         break;
                     }
@@ -391,21 +418,52 @@ namespace FrankenMAGateway
             }
         }
 
-        private byte[] faderValues = new byte[24];
+        private FaderValue[] faderValues = new FaderValue[24];
         private bool _telnetStatus = false;
         private string _logs;
 
+        private Dictionary<SerialPort, string> _receiveBuffer = new Dictionary<SerialPort, string>();
+
         private void Port_DataReceived(object sender, SerialDataReceivedEventArgs e)
         {
+            string received = null;
             try
             {
                 var port = sender as SerialPort;
-                string received = port.ReadExisting();
-                OnPortData(received);
+                received = port.ReadExisting();
+
+                string buffer = null;
+                lock (_receiveBuffer)
+                {
+                    _receiveBuffer[port] += received;
+                    buffer = _receiveBuffer[port];
+                }
+                if (buffer.Contains("\n"))
+                {
+                    var parts = buffer.Split('\n');
+                    string leftInBuffer = "";
+                    foreach (var part in parts)
+                    {
+                        try
+                        {
+                            OnPortData(part);
+                            //Log(part.Replace("\n", ""));
+                        } catch
+                        {
+                            //Log("PARTIAL: " + part.Replace("\n", ""));
+                            leftInBuffer += part;
+                        }
+                    }
+                    lock (_receiveBuffer)
+                    {
+                        _receiveBuffer[port] = leftInBuffer;
+                    }
+                }
             }
-            catch
+            catch (Exception exception)
             {
-                // Do nothing :) 
+                Log("ERROR: " + received);
+                Log(exception.ToString());
             }
         }
 
@@ -472,11 +530,28 @@ namespace FrankenMAGateway
                     int page = (id >= 12) ? Settings.FaderTopPage : Settings.FaderBottomPage;
                     int faderId = (id >= 12) ? (id - 12 + Settings.FaderTopStartId) : (id + Settings.FaderBottomStartId);
 
-                    faderValues[id] = byteValue;
 
-                    lock (_lock)
+                    if (Math.Abs(faderValues[id].value - value) >= 2)
                     {
-                        _commandQueue.Enqueue($"fader {page}.{faderId} at {value}");
+                        faderValues[id].moving = true;
+                        faderValues[id].value = value;
+                        faderValues[id].lastChange = DateTime.Now;
+                    }
+                    if (Math.Abs(faderValues[id].value - value) < 2)
+                    {
+                        var diff = DateTime.Now.Subtract(faderValues[id].lastChange);
+                        if (diff > TimeSpan.FromMilliseconds(500))
+                        {
+                            faderValues[id].moving = false;
+                        }
+                    }
+
+                    if (faderValues[id].moving || !Settings.DebounceFaders)
+                    {
+                        lock (_lock)
+                        {
+                            _commandQueue.Enqueue($"fader {page}.{faderId} at {value}");
+                        }
                     }
                 }
 

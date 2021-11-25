@@ -53,6 +53,10 @@ namespace FrankenMAGateway
         {
             if (Gateway.TelnetStatus && Gateway.PortStatuses[0] && Gateway.PortStatuses[1] && Gateway.PortStatuses[2])
             {
+                if (m_notifyIcon == null)
+                {
+                    return;
+                }
                 m_notifyIcon.Icon = new System.Drawing.Icon("green.ico");
                 m_notifyIcon.Text = "CONNECTED";
                 m_notifyIcon.BalloonTipText = "FrankenMA is connected";
