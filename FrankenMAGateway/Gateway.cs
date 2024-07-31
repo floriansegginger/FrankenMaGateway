@@ -77,11 +77,12 @@ namespace FrankenMAGateway
 
         public int BaudRate { get; set; } = 115200;
 
-        private bool[] portStatuses = { false, false, false };
+        private bool[] portStatuses = { false, false, false, false };
 
         public string Port0Status => portStatuses[0] ? "OK" : "NOK";
         public string Port1Status => portStatuses[1] ? "OK" : "NOK";
         public string Port2Status => portStatuses[2] ? "OK" : "NOK";
+        public string Port3Status => portStatuses[3] ? "OK" : "NOK";
 
         public bool[] PortStatuses
         {
@@ -524,7 +525,7 @@ namespace FrankenMAGateway
                 {
                     var parts = line.Split(' ');
                     int id = int.Parse(parts[1]);
-                    int value = (int)Math.Round((double.Parse(parts[2]) / 255.0) * 100.0);
+                    int value = (int)Math.Round((double.Parse(parts[2]) / 1023.0) * 100.0);
                     byte byteValue = (byte)value;
 
                     int page = (id >= 12) ? Settings.FaderTopPage : Settings.FaderBottomPage;
